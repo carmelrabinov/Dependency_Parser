@@ -1,0 +1,5 @@
+.idea
+dependency_parser/__pycache__/*
+results/*
+results
+dependency_parser/__pycache__/
