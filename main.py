@@ -21,6 +21,9 @@ train_path = project_dir + '\\data\\train.labeled'
 debug_path = project_dir + '\\data\\debug.labeled'
 
 parser = dependency_parser.DependencyParser()
-parser.train(debug_path, max_iter=30)
-accuracy = parser.test(debug_path)
-print('accuracy is ', accuracy)
+parser.train(train_path, max_iter=20)
+parser.save_model('base_features_all_train_set')
+accuracy = parser.test(test_path)
+print('accuracy over test set is ', accuracy)
+accuracy_intrain = parser.test(debug_path)
+print('accuracy over intrain set is ', accuracy_intrain)

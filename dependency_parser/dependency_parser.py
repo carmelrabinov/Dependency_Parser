@@ -1,7 +1,8 @@
 from .chu_liu import Digraph
 import numpy as np
 import time
-
+import os
+import pickle
 
 class DependencyParser:
     
@@ -183,6 +184,14 @@ class DependencyParser:
                 glm += self.get_features(parent_data, child_data)
         return glm
 
+    def save_model(self, resultsfn):
+        print('Saving model to {}'.format(resultsfn))
+        # creating directory
+        if not os.path.exists(resultsfn):
+            os.makedirs(resultsfn)
+        # dump all results:
+        with open(resultsfn + '\\model.pkl', 'wb') as f:
+            pickle.dump(self, f)
 '''
 train:
 1. get sentence, extract his tree
