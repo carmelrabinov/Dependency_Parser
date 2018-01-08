@@ -16,11 +16,15 @@ class DependencyParser:
                        'PRP$': 23, 'RB': 16, 'RBR': 19, 'RBS': 39, 'RP': 22, 'SYM': 42, 'TO': 17,
                         'UH': 41, 'VB': 6, 'VBD': 14, 'VBG': 12, 'VBN': 15, 'VBP': 21, 'VBZ': 11,
                          'WDT': 20, 'WP': 29, 'WP$': 35, 'WRB': 32, '``': 26, 'root': 45}
+        self.pos_size = 46
+        self.vocabulary = {'root': 0}
+        self.v_size = 0
 
     def data_preprocessing(self, path):
         data = []
         data_edges = []
         with open(path, 'r') as f:
+            counter = 1
             sentence_data = {}
             sentence_edges = {}
             for line in f:
@@ -31,6 +35,9 @@ class DependencyParser:
                     sentence_data = {}
                     sentence_edges = {}
                 else:
+                    if word[1] not in self.vocabulary.keys():
+                        self.vocabulary[word[1]] = counter
+                        counter += 1
                     sentence_data[int(word[0])] = (word[6], word[1], word[3])
                     if word[6] not in sentence_edges:
                         sentence_edges[int(word[6])] = [int(word[0])]
@@ -43,7 +50,9 @@ class DependencyParser:
             
         self.data = data
         self.data_edges = data_edges
+        self.v_size = len(self.vocabulary)
 
+          
     def create_succesors(self, sen_length):
         succesors = {}
         for i in range(0, sen_length):
@@ -112,19 +121,55 @@ class DependencyParser:
                 break
 
     def get_features(self, parent_node, child_node):
-        # direction is: node_id_1 --> node_id_2
-        # for now: node = (word, pos), or 'root'
-        feature = np.zeros(self.features_size)
+        # directed edge: parent_node --> child_node
+        # node = (word, pos)
         (parent_word, parent_pos) = parent_node
         (child_word, child_pos) = child_node
-        
-        # feature 3
-        feature[self.pos[parent_pos]] = 1
-        
-        return feature
+
+        ### Base Features:
+        # feature 1: p-word, p-pos
+        f1 = np.zeros(self.pos_size*self.v_size)  # size = POS size * Vocabulary size
+        f1[self.vocabulary[parent_word]*self.pos_size+self.pos[parent_pos]] = 1
+
+        # feature 2: p-word
+        f2 = np.zeros(self.v_size)  # size: Vocabulary size
+        f2[self.vocabulary[parent_word]] = 1
+
+        # feature 3: p-pos
+        f3 = np.zeros(self.pos_size)  # size: POS size
+        f3[self.pos[parent_pos]] = 1
+
+        # feature 4: c-word, c-pos
+        f4 = np.zeros(self.pos_size*self.v_size)  # size = POS size * Vocabulary size
+        f4[self.vocabulary[child_word]*self.pos_size+self.pos[child_pos]] = 1
+
+        # feature 5: c-word
+        f5 = np.zeros(self.v_size)  # size: Vocabulary size
+        f5[self.vocabulary[child_word]] = 1
+
+        # feature 6: p-pos
+        f6 = np.zeros(self.pos_size)  # size: POS size
+        f6[self.pos[child_pos]] = 1
+
+        # feature 8: p-pos, c-pos, c-word
+        f8 = np.zeros((self.pos_size**2)*self.v_size)  # size: (POS size)^2 * Vocabulary size
+        f8[self.vocabulary[child_word]*(self.pos_size**2) + self.pos[child_pos]*self.pos_size + self.pos[parent_pos]] = 1
+
+        # feature 10: p-word, p-pos, c-pos
+        f10 = np.zeros((self.pos_size**2)*self.v_size)  # size: (POS size)^2 * Vocabulary size
+        f10[self.vocabulary[parent_word]*(self.pos_size**2) + self.pos[child_pos]*self.pos_size+self.pos[parent_pos]] = 1
+
+        # feature 13: p-pos, c-pos
+        f13 = np.zeros(self.pos_size**2)  # size: (POS size)^2
+        f13[self.pos[parent_pos]*self.pos_size+self.pos[child_pos]] = 1
+
+        ### Complex Features:
+        # if self.mode == 'complex':
+
+        return np.concatenate((f1, f2, f3, f4, f5, f6, f8, f10, f13))
 
     def get_features_size(self):
-        return len(self.pos)
+        return len(self.get_features(('root', 'root'), ('root', 'root')))
     
     def get_glm(self, mst):
         glm = np.zeros(self.features_size)
