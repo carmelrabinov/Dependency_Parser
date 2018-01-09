@@ -4,11 +4,14 @@ import time
 import os
 import pickle
 
+
 class DependencyParser:
     
     def __init__(self):
         self.w = 0
         self.mode = 'base'
+        self.logger = {}
+        self.features = {}
         self.features_size = 0
         self.curr_sentence = 0
         self.pos = {'#': 44, '$': 33, "''": 28, '(': 36, ')': 37, ',': 1, '.': 10, ':': 30, 'CC': 13,
@@ -21,39 +24,49 @@ class DependencyParser:
         self.vocabulary = {'root': 0}
         self.v_size = 0
 
-    def data_preprocessing(self, path):
-        data = []
-        data_edges = []
+    def data_preprocessing(self, path, mode):
+        self.data = []
+        self.data_edges = []
         with open(path, 'r') as f:
             counter = 1
             sentence_data = {}
             sentence_edges = {}
             for line in f:
                 word = line.split('\t', 10)
+                # if line has ended it means the sentence is ended and append it to the data list
                 if word[0] == '\n':
-                    data.append(sentence_data)
-                    data_edges.append(sentence_edges)
+                    self.data.append(sentence_data)
+                    self.data_edges.append(sentence_edges)
                     sentence_data = {}
                     sentence_edges = {}
                 else:
-                    if word[1] not in self.vocabulary.keys():
+                    # word[0] is the child index
+                    # word[1] is the child word
+                    # word[3] is the child pos
+                    # word[6] is the parent index
+
+                    # add the child word to the vocabulary dictionary
+                    if mode == 'train' and word[1] not in self.vocabulary.keys():
                         self.vocabulary[word[1]] = counter
                         counter += 1
+
+                    # add child data to the sentence_data dictionary
                     sentence_data[int(word[0])] = (word[6], word[1], word[3])
-                    if word[6] not in sentence_edges:
+
+                    # add the edge parent_index --> child_index to sentence_edges dictionary
+                    if int(word[6]) not in sentence_edges:
                         sentence_edges[int(word[6])] = [int(word[0])]
                     else:
                         sentence_edges[int(word[6])].append(int(word[0]))
-        for sentence_edges, sentence in zip(data_edges, data):
+
+        for sentence_edges, sentence in zip(self.data_edges, self.data):
             for i in range(len(sentence)):
                 if i not in sentence_edges.keys():
                     sentence_edges[i] = []
             
-        self.data = data
-        self.data_edges = data_edges
-        self.v_size = len(self.vocabulary)
+        if mode == 'train':
+            self.v_size = len(self.vocabulary)
 
-          
     def create_succesors(self, sen_length):
         succesors = {}
         for i in range(0, sen_length):
@@ -62,22 +75,45 @@ class DependencyParser:
                 succesors[i].remove(i)
         return succesors
 
-    def get_score(self, node_id_1, node_id_2):
-        # direction is: node_id_1 --> node_id_2
-        if node_id_1 == 0:
-            parent_data = ('root', 'root')
+    def get_score(self, parent_id, child_id):
+        # direction is: parent_id --> child_id
+        self.update_feature_to_feature_dict(self.curr_sentence, parent_id, child_id)
+        return np.sum(self.w[self.features[(self.curr_sentence, parent_id, child_id)]])
+
+    def update_feature_to_feature_dict(self, sen_number, parent_id, child_id):
+        # this method is an auxiliary to get_feature method that ensures that
+        # the feature is already calculated and in the feature dictionary
+        if (sen_number, parent_id, child_id) in self.features:
+            return
         else:
-            parent_data = self.data[self.curr_sentence][node_id_1][1:]
-        child_data = self.data[self.curr_sentence][node_id_2][1:]
-        edge_feature = self.get_features(parent_data, child_data)
-        return np.dot(edge_feature, self.w)
+            if parent_id == 0:
+                parent_data = ('root', 'root')
+            else:
+                parent_data = self.data[sen_number][parent_id][1:]
+            child_data = self.data[sen_number][child_id][1:]
+            edge_feature = self.get_features(parent_data, child_data)
+            self.features[(sen_number, parent_id, child_id)] = edge_feature
+            return
+
+    def get_glm(self, mst):
+        glm = []
+
+        # iterate over all edges in the mst
+        for parent, children_list in mst.items():
+            for child in children_list:
+                self.update_feature_to_feature_dict(self.curr_sentence, parent, child)
+                # add feature indexes to the glm
+                glm.extend(self.features[(self.curr_sentence, parent, child)])
+
+        return glm
 
     # def predict_sentence(self, sentence):
     #     graph = Digraph(self.create_succesors(len(sentence)), get_score=self.get_score)
     #     result = graph.mst().successors
 
     def test(self, test_path):
-        self.data_preprocessing(test_path)
+        t_start = time.time()
+        self.data_preprocessing(test_path, mode='test')
         correct_counter = 0
         total_counter = 0
 
@@ -90,13 +126,22 @@ class DependencyParser:
                 correct_counter += len([w for w in mst[i] if w in self.data_edges[sen_idx][i]])
                 total_counter += len(self.data_edges[sen_idx][i])
 
-        return float(correct_counter) / float(total_counter)
+        print('finished testing in {} minutes'.format((time.time() - t_start)/60))
+        return np.float(correct_counter) / np.float(total_counter) * 100
 
     def train(self, data_path, max_iter=20, mode='base'):
         self.mode = mode
-        self.data_preprocessing(data_path)
+        self.data_preprocessing(data_path, mode='train')
         self.features_size = self.get_features_size()
         self.w = np.zeros(self.features_size)
+
+        self.logger['mode'] = mode
+        self.logger['vocabulary size'] = self.v_size
+        self.logger['features size'] = self.features_size
+        self.logger['pos size'] = self.pos_size
+        self.logger['train data path'] = data_path
+        self.logger['train sentences number'] = len(self.data)
+        self.logger['max iterations'] = max_iter
 
         t_start = time.time()
         # run preceptron algorithm for max_iter times
@@ -113,77 +158,100 @@ class DependencyParser:
                     early_stop_conditions = False
                     predicted_feature = self.get_glm(result)
                     true_feature = self.get_glm(self.data_edges[sen_idx])
-                    self.w += true_feature - predicted_feature
+                    np.add.at(self.w, true_feature, 1)
+                    np.add.at(self.w, predicted_feature, -1)
 
-            print('finished iteration {} in {}'.format(i, time.time() - t_start))
+            print('finished iteration {} in {} minutes'.format(i+1, (time.time() - t_start)/60))
 
             # if all predictions are correct - stop the training
             if early_stop_conditions:
                 break
 
-    def get_features(self, parent_node, child_node):
+        self.logger['training time [minutes]'] = (time.time() - t_start)/60
+
+    def get_features(self, parent_node, child_node, get_size=False):
         # directed edge: parent_node --> child_node
-        # node = (word, pos)
+
         (parent_word, parent_pos) = parent_node
         (child_word, child_pos) = child_node
 
+        try:
+            parent_word_ind = self.vocabulary[parent_word]
+        except:
+            parent_word_ind = -1
+        parent_pos_ind = self.pos[parent_pos]
+        try:
+            child_word_ind = self.vocabulary[child_word]
+        except:
+            child_word_ind = -1
+        child_pos_ind = self.pos[child_pos]
+
+        curr_size = 0
+        feature = []
+
         ### Base Features:
         # feature 1: p-word, p-pos
-        f1 = np.zeros(self.pos_size*self.v_size)  # size = POS size * Vocabulary size
-        f1[self.vocabulary[parent_word]*self.pos_size+self.pos[parent_pos]] = 1
+        f1 = curr_size + parent_word_ind*self.pos_size + parent_pos_ind
+        curr_size += self.pos_size*self.v_size   # size: POS size * Vocabulary size
+        if parent_word_ind != -1:
+            feature.append(f1)
 
         # feature 2: p-word
-        f2 = np.zeros(self.v_size)  # size: Vocabulary size
-        f2[self.vocabulary[parent_word]] = 1
+        f2 = curr_size + parent_word_ind
+        curr_size += self.v_size    # size: Vocabulary size
+        if parent_word_ind != -1:
+            feature.append(f2)
 
         # feature 3: p-pos
-        f3 = np.zeros(self.pos_size)  # size: POS size
-        f3[self.pos[parent_pos]] = 1
+        f3 = curr_size + parent_pos_ind
+        curr_size += self.pos_size    # size: POS size
+        feature.append(f3)
 
         # feature 4: c-word, c-pos
-        f4 = np.zeros(self.pos_size*self.v_size)  # size = POS size * Vocabulary size
-        f4[self.vocabulary[child_word]*self.pos_size+self.pos[child_pos]] = 1
+        f4 = curr_size + child_word_ind*self.pos_size+child_pos_ind
+        curr_size += self.pos_size*self.v_size  # size = POS size * Vocabulary size
+        if child_word_ind != -1:
+            feature.append(f4)
 
         # feature 5: c-word
-        f5 = np.zeros(self.v_size)  # size: Vocabulary size
-        f5[self.vocabulary[child_word]] = 1
+        f5 = curr_size + child_word_ind  # size: Vocabulary size
+        curr_size += self.v_size  # size: Vocabulary size
+        if parent_word_ind != -1:
+            feature.append(f5)
 
         # feature 6: p-pos
-        f6 = np.zeros(self.pos_size)  # size: POS size
-        f6[self.pos[child_pos]] = 1
+        f6 = curr_size + child_pos_ind
+        curr_size += self.pos_size  # size: POS size
+        feature.append(f6)
 
         # feature 8: p-pos, c-pos, c-word
-        f8 = np.zeros((self.pos_size**2)*self.v_size)  # size: (POS size)^2 * Vocabulary size
-        f8[self.vocabulary[child_word]*(self.pos_size**2) + self.pos[child_pos]*self.pos_size + self.pos[parent_pos]] = 1
+        f8 = curr_size + child_word_ind*(self.pos_size**2) + child_pos_ind*self.pos_size + parent_pos_ind
+        curr_size += self.pos_size**2 * self.v_size    # size: (POS size)^2 * Vocabulary size
+        if child_word_ind != -1:
+            feature.append(f8)
 
         # feature 10: p-word, p-pos, c-pos
-        f10 = np.zeros((self.pos_size**2)*self.v_size)  # size: (POS size)^2 * Vocabulary size
-        f10[self.vocabulary[parent_word]*(self.pos_size**2) + self.pos[child_pos]*self.pos_size+self.pos[parent_pos]] = 1
+        f10 = curr_size + parent_word_ind*(self.pos_size**2) + child_pos_ind*self.pos_size+parent_pos_ind
+        curr_size += self.pos_size**2 * self.v_size    # size: (POS size)^2 * Vocabulary size
+        if parent_word_ind != -1:
+            feature.append(f10)
 
         # feature 13: p-pos, c-pos
-        f13 = np.zeros(self.pos_size**2)  # size: (POS size)^2
-        f13[self.pos[parent_pos]*self.pos_size+self.pos[child_pos]] = 1
+        f13 = curr_size + parent_pos_ind*self.pos_size+child_pos_ind
+        curr_size += self.pos_size ** 2  # size: POS size^2
+        feature.append(f13)
 
         ### Complex Features:
         # if self.mode == 'complex':
 
-        return np.concatenate((f1, f2, f3, f4, f5, f6, f8, f10, f13))
+        if get_size:
+            return curr_size
+
+        return feature
 
     def get_features_size(self):
-        return len(self.get_features(('root', 'root'), ('root', 'root')))
+        return self.get_features(('root', 'root'), ('root', 'root'), get_size=True)
     
-    def get_glm(self, mst):
-        glm = np.zeros(self.features_size)
-        for parent, children_list in mst.items():
-            for child in children_list:
-                if parent == 0:
-                    parent_data = ('root', 'root')
-                else:
-                    parent_data = self.data[self.curr_sentence][parent][1:]
-                child_data = self.data[self.curr_sentence][child][1:]
-                glm += self.get_features(parent_data, child_data)
-        return glm
-
     def save_model(self, resultsfn):
         print('Saving model to {}'.format(resultsfn))
         # creating directory
