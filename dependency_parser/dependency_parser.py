@@ -5,8 +5,14 @@ import os
 import pickle
 
 
+def load_model(Fn):
+    with open(Fn + '\\model.pkl', 'rb') as f:
+        model = pickle.load(f)
+    return model
+
+
 class DependencyParser:
-    
+
     def __init__(self):
         self.w = 0
         self.mode = 'base'
@@ -25,6 +31,12 @@ class DependencyParser:
         self.v_size = 0
 
     def data_preprocessing(self, path, mode):
+        """
+        preprocess the data and save it to data and data edges structures
+        :param path: path to data file
+        :param mode: train mode or test mode
+        :return: None
+        """
         self.data = []
         self.data_edges = []
         with open(path, 'r') as f:
@@ -68,6 +80,10 @@ class DependencyParser:
             self.v_size = len(self.vocabulary)
 
     def create_succesors(self, sen_length):
+        """
+        :param sen_length: sentence length
+        :return: all possible edges in a sentence in the form of a dict[parent] = list of children
+        """
         succesors = {}
         for i in range(0, sen_length):
             succesors[i] = list(range(1, sen_length + 1))
@@ -76,11 +92,27 @@ class DependencyParser:
         return succesors
 
     def get_score(self, parent_id, child_id):
-        # direction is: parent_id --> child_id
+        """
+        return the weight of an edge (w * feature)
+        :param parent_id: parent word number in the sentence (root is 0)
+        :param child_id: child word number in the sentence
+        :return: a scalar - the weight of an edge (w * feature)
+        """
+        # add feature to feature dictionary if does not exist
         self.update_feature_to_feature_dict(self.curr_sentence, parent_id, child_id)
+
+        # perform dot multiplication
         return np.sum(self.w[self.features[(self.curr_sentence, parent_id, child_id)]])
 
     def update_feature_to_feature_dict(self, sen_number, parent_id, child_id):
+        """
+        save the feature for the edge (parent -> child) to the features dictionary if it does not exist
+        :param sen_number: sentence number
+        :param parent_id: parent word number in the sentence (root is 0)
+        :param child_id: child word number in the sentence
+        :return: None
+        """
+
         # this method is an auxiliary to get_feature method that ensures that
         # the feature is already calculated and in the feature dictionary
         if (sen_number, parent_id, child_id) in self.features:
@@ -96,12 +128,18 @@ class DependencyParser:
             return
 
     def get_glm(self, mst):
+        """
+        :param mst: a minimum spanning tree of a sentence in the form of a dict[parent] = list of children
+        :return: sum of all edges feature as a list of indexes
+        """
         glm = []
-
         # iterate over all edges in the mst
         for parent, children_list in mst.items():
             for child in children_list:
+
+                # add feature to feature dictionary if does not exist
                 self.update_feature_to_feature_dict(self.curr_sentence, parent, child)
+
                 # add feature indexes to the glm
                 glm.extend(self.features[(self.curr_sentence, parent, child)])
 
@@ -112,24 +150,51 @@ class DependencyParser:
     #     result = graph.mst().successors
 
     def test(self, test_path):
+        """
+        predict and test accuracy of test set
+        :param test_path: path to test set data file
+        :return: accuracy in percentage over the test set
+        """
+
         t_start = time.time()
         self.data_preprocessing(test_path, mode='test')
         correct_counter = 0
         total_counter = 0
 
+        self.logger['test data path'] = test_path
+        self.logger['test sentences number'] = len(self.data)
+
+        # iterate ove all the data
         for sen_idx, sen in enumerate(self.data):
             self.curr_sentence = sen_idx
+
+            # predict the mst
             graph = Digraph(self.create_succesors(len(sen)), get_score=self.get_score)
             mst = graph.mst().successors
+
             # compare the predicted mst to the true one and count all correct edges
             for i in range(len(mst)):
                 correct_counter += len([w for w in mst[i] if w in self.data_edges[sen_idx][i]])
                 total_counter += len(self.data_edges[sen_idx][i])
 
-        print('finished testing in {} minutes'.format((time.time() - t_start)/60))
-        return np.float(correct_counter) / np.float(total_counter) * 100
+        # clean the data
+        del self.data, self.data_edges
+        self.features = {}
+
+        accuracy = np.float(correct_counter) / np.float(total_counter) * 100
+        print('finished testing in {} minutes, test accuracy: {}'.format((time.time() - t_start)/60, accuracy))
+        self.logger['test accuracy'] = accuracy
+        self.logger['test time [minutes]'] = (time.time() - t_start) / 60
+        return accuracy
 
     def train(self, data_path, max_iter=20, mode='base'):
+        """
+        train weights given a data set of sentences
+        :param data_path: path to train set data file
+        :param max_iter: max number of iteration that will be performed in the perceptron algorithm
+        :param mode: base mode or complex mode of features
+        :return:
+        """
         self.mode = mode
         self.data_preprocessing(data_path, mode='train')
         self.features_size = self.get_features_size()
@@ -144,7 +209,7 @@ class DependencyParser:
         self.logger['max iterations'] = max_iter
 
         t_start = time.time()
-        # run preceptron algorithm for max_iter times
+        # run perceptron algorithm for max_iter times
         for i in range(max_iter):
 
             early_stop_conditions = True
@@ -169,8 +234,18 @@ class DependencyParser:
 
         self.logger['training time [minutes]'] = (time.time() - t_start)/60
 
+        # clean the data
+        del self.data, self.data_edges
+        self.features = {}
+
     def get_features(self, parent_node, child_node, get_size=False):
-        # directed edge: parent_node --> child_node
+        """
+        create a feature vector as list of indexes of the ones for a directed edge(parent_node --> child_node)
+        :param parent_node: all parent data (wod, pos, etc) as a tuple
+        :param child_node: all child data (wod, pos, etc) as a tuple
+        :param get_size: if True return only the feature vector size
+        :return: feature vector as list of indexes
+        """
 
         (parent_word, parent_pos) = parent_node
         (child_word, child_pos) = child_node
@@ -250,9 +325,17 @@ class DependencyParser:
         return feature
 
     def get_features_size(self):
+        """
+        :return: feature vector size
+        """
         return self.get_features(('root', 'root'), ('root', 'root'), get_size=True)
     
     def save_model(self, resultsfn):
+        """
+        saves the parser as a pickle file
+        :param resultsfn: path to directory to save in the pickle file
+        :return: None
+        """
         print('Saving model to {}'.format(resultsfn))
         # creating directory
         if not os.path.exists(resultsfn):
@@ -260,32 +343,14 @@ class DependencyParser:
         # dump all results:
         with open(resultsfn + '\\model.pkl', 'wb') as f:
             pickle.dump(self, f)
-'''
-train:
-1. get sentence, extract his tree
-2. create a succesors dictionary including all possible edges for the sentence
-3. using cio_lau(W) get best MST 
-4. if sentence tree != MST update weights by:
-    5. get the MST, sum all get_score pairs to get f1
-    6. get tree, sum all get_score pairs to get f2
-    7. w += f2 - f1
-    
-    
-predict (w):
-1. get sentence
-2. create a succesors dictionary including all possible edges for the sentence
-3. return ciu_lau(w) results
 
-
-get_score(w, node_id_1, node_id_2):
-    # direction is: node_id_1 --> node_id_2
-    f = get features of (node[node_id_1], node[node_id_2])
-    return f.dot(w)
-    # node is the data relevant like (word[i], pos[i], pos[i-1] etc...)
-
-for more efficient training we can calculate all posible pairs features and then
-get_score(w, node_id_1, node_id_2):
-    # direction is: node_id_1 --> node_id_2
-    return f_dict[(node_id_1, node_id_2)].dot(w)
-
-'''
+    def print_logs(self, resultsfn):
+        """
+        saves the logs
+        :param resultsfn: path to directory to save in the log file
+        :return: None
+        """
+        print('Saving logs to {}'.format(resultsfn))
+        with open(resultsfn + '\\logs.txt', 'w') as f:
+            for key, value in sorted(self.logger.items()):
+                f.write('{}: {}\n'.format(key, value))
