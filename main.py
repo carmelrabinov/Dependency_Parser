@@ -22,11 +22,10 @@ results_path = 'results\\complex_gap_features'
 
 parser = DependencyParser()
 parser.train(train_toy_path, max_iter=20, mode='complex')
+# parser.predict(test_path, results_path)
+parser.test(test_path)
+parser.print_logs(results_path)
 
 # parser.save_model(results_path)
 
 # parser = load_model(results_path)
-for _ in range(5):
-    parser.test(test_path)
-
-parser.print_logs(results_path)
