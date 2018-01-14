@@ -21,9 +21,10 @@ debug_path = project_dir + '\\data\\debug.labeled'
 results_path = project_dir + '\\results\\complex_left_right_pos_features'
 
 parser = DependencyParser()
-parser.train(train_toy_path, max_iter=20, mode='complex')
+parser.train(train_toy_path, test_path, shuffle=True, max_iter=30, mode='base')
+
 # parser.predict(test_path, results_path)
-parser.test(test_path)
+# parser.test(debug_path)
 parser.print_logs(results_path)
 
 # parser.save_model(results_path)

@@ -15,8 +15,14 @@ class DependencyParser:
     def __init__(self):
         self.w = 0
         self.mode = 'base'
+        self.operation_mode = 'train'
         self.logger = {}
         self.features = {}
+        self.data = []
+        self.data_edges = []
+        self.test_data = []
+        self.test_data_edges = []
+        self.test_features = {}
         self.features_size = 0
         self.curr_sentence = 0
         self.pos = {'#': 44, '$': 33, "''": 28, '(': 36, ')': 37, ',': 1, '.': 10, ':': 30, 'CC': 13,
@@ -33,11 +39,11 @@ class DependencyParser:
         """
         preprocess the data and save it to data and data edges structures
         :param path: path to data file
-        :param mode: train mode or test mode
+        :param mode: 'train', 'test' or 'comp' mode
         :return: None
         """
-        self.data = []
-        self.data_edges = []
+        data = []
+        data_edges = []
         with open(path, 'r') as f:
             counter = 1
             sentence_data = {}
@@ -48,7 +54,7 @@ class DependencyParser:
                     word = line.split('\t', 10)
                     # if line has ended it means the sentence has ended and append it to the data list
                     if word[0] == '\n':
-                        self.data.append(sentence_data)
+                        data.append(sentence_data)
                         sentence_data = {}
                     else:
                         # word[0] is the child index
@@ -57,14 +63,15 @@ class DependencyParser:
 
                         # add child data to the sentence_data dictionary
                         sentence_data[int(word[0])] = (word[1], word[3])
+                self.data = data
 
             else:    # model is 'train' or 'test'
                 for line in f:
                     word = line.split('\t', 10)
                     # if line has ended it means the sentence is ended and append it to the data list
                     if word[0] == '\n':
-                        self.data.append(sentence_data)
-                        self.data_edges.append(sentence_edges)
+                        data.append(sentence_data)
+                        data_edges.append(sentence_edges)
                         sentence_data = {}
                         sentence_edges = {}
                     else:
@@ -87,13 +94,18 @@ class DependencyParser:
                         else:
                             sentence_edges[int(word[6])].append(int(word[0]))
 
-                for sentence_edges, sentence in zip(self.data_edges, self.data):
+                for sentence_edges, sentence in zip(data_edges, data):
                     for i in range(len(sentence)+1):
                         if i not in sentence_edges.keys():
                             sentence_edges[i] = []
 
-        if mode == 'train':
-            self.v_size = len(self.vocabulary)
+            if mode == 'train':
+                self.v_size = len(self.vocabulary)
+                self.data = data
+                self.data_edges = data_edges
+            elif mode == 'test':
+                self.test_data = data
+                self.test_data_edges = data_edges
 
     def create_succesors(self, sen_length):
         """
@@ -118,7 +130,11 @@ class DependencyParser:
         self.update_feature_to_feature_dict(self.curr_sentence, parent_id, child_id)
 
         # perform dot multiplication
-        return np.sum(self.w[self.features[(self.curr_sentence, parent_id, child_id)]])
+        if self.operation_mode == 'train':
+            score = np.sum(self.w[self.features[(self.curr_sentence, parent_id, child_id)]])
+        else:
+            score = np.sum(self.w[self.test_features[(self.curr_sentence, parent_id, child_id)]])
+        return score
 
     def update_feature_to_feature_dict(self, sen_number, parent_id, child_id):
         """
@@ -128,20 +144,61 @@ class DependencyParser:
         :param child_id: child word number in the sentence
         :return: None
         """
+        if self.operation_mode == 'train':
+            if (sen_number, parent_id, child_id) in self.features:
+                return
+            curr_sen_data = self.data[sen_number]
+        else:
+            if (sen_number, parent_id, child_id) in self.test_features:
+                return
+            curr_sen_data = self.test_data[sen_number]
 
         # this method is an auxiliary to get_feature method that ensures that
         # the feature is already calculated and in the feature dictionary
-        if (sen_number, parent_id, child_id) in self.features:
-            return
+
+        # calculate the pos of parent[i-1]
+        if parent_id > 1:
+            parent_left_pos_ind = self.pos[curr_sen_data[parent_id - 1][1]]
+        elif parent_id == 1:
+            parent_left_pos_ind = self.pos['root']
         else:
-            if parent_id == 0:
-                parent_data = ('root', 'root', 0)
-            else:
-                parent_data = self.data[sen_number][parent_id] + (parent_id,)
-            child_data = self.data[sen_number][child_id] + (child_id,)
-            edge_feature = self.get_features(parent_data, child_data)
+            parent_left_pos_ind = -1
+
+        # calculate the pos of child[i-1]
+        if child_id > 1:
+            child_left_pos_ind = self.pos[curr_sen_data[child_id - 1][1]]
+        elif child_id == 1:
+            child_left_pos_ind = self.pos['root']
+        else:
+            child_left_pos_ind = -1
+
+        sen_length = len(curr_sen_data)  # curr sentence length (without root, meaning true length is +1)
+
+        # calculate the pos of parent[i+1]
+        if parent_id < sen_length:
+            parent_right_pos_ind = self.pos[curr_sen_data[parent_id + 1][1]]
+        else:
+            parent_right_pos_ind = -1
+
+        # calculate the pos of child[i+1]
+        if child_id < sen_length:
+            child_right_pos_ind = self.pos[curr_sen_data[child_id + 1][1]]
+        else:
+            child_right_pos_ind = -1
+
+        if parent_id == 0:
+            parent_data = ('root', 'root', 0, parent_right_pos_ind, parent_right_pos_ind)
+        else:
+            parent_data = curr_sen_data[parent_id] + (parent_id, parent_right_pos_ind, parent_left_pos_ind)
+        child_data = curr_sen_data[child_id] + (child_id, child_right_pos_ind, child_left_pos_ind)
+
+        edge_feature = self.get_features(parent_data, child_data, curr_sen_data)
+
+        if self.operation_mode == 'train':
             self.features[(sen_number, parent_id, child_id)] = edge_feature
-            return
+        else:
+            self.test_features[(sen_number, parent_id, child_id)] = edge_feature
+        return
 
     def get_glm(self, mst):
         """
@@ -156,7 +213,10 @@ class DependencyParser:
                 self.update_feature_to_feature_dict(self.curr_sentence, parent, child)
 
                 # add feature indexes to the glm
-                glm.extend(self.features[(self.curr_sentence, parent, child)])
+                if self.operation_mode == 'train':
+                    glm.extend(self.features[(self.curr_sentence, parent, child)])
+                else:
+                    glm.extend(self.test_features[(self.curr_sentence, parent, child)])
 
         return glm
 
@@ -164,7 +224,7 @@ class DependencyParser:
         """
         predict results for comp set and save a prdiction.wtag results file if results_path is provided
         :param comp_path: path to comp set data file
-        :param results_path: path to result directory where prediction will be saved
+        :param resultsfn: path to result directory where prediction will be saved
         :return: predicted results as a list of mst in the form of dictionary[parent] -> children list
         """
 
@@ -208,23 +268,24 @@ class DependencyParser:
         self.logger['prediction time'] = (time.time() - t_start) / 60
         return predictions
 
-    def test(self, test_path):
+    def test(self, test_path=None):
         """
         predict and test accuracy of test set
         :param test_path: path to test set data file
         :return: accuracy in percentage over the test set
         """
-
+        self.operation_mode = 'test'
         t_start = time.time()
-        self.data_preprocessing(test_path, mode='test')
+        if test_path:
+            self.data_preprocessing(test_path, mode='test')
         correct_counter = 0
         total_counter = 0
 
         self.logger['test data path'] = test_path
-        self.logger['test sentences number'] = len(self.data)
+        self.logger['test sentences number'] = len(self.test_data)
 
         # iterate ove all the data
-        for sen_idx, sen in enumerate(self.data):
+        for sen_idx, sen in enumerate(self.test_data):
             self.curr_sentence = sen_idx
 
             # predict the mst
@@ -237,29 +298,38 @@ class DependencyParser:
             # print('\n')
             # compare the predicted mst to the true one and count all correct edges
             for i in range(len(mst)):
-                correct_counter += len([w for w in mst[i] if w in self.data_edges[sen_idx][i]])
-                total_counter += len(self.data_edges[sen_idx][i])
+                correct_counter += len([w for w in mst[i] if w in self.test_data_edges[sen_idx][i]])
+                total_counter += len(self.test_data_edges[sen_idx][i])
 
         # clean the data
-        del self.data, self.data_edges
-        self.features = {}
+        if test_path:
+            self.test_data = []
+            self.test_data_edges = []
+            self.test_features = {}
 
         accuracy = np.float(correct_counter) / np.float(total_counter) * 100
         print('finished testing in {0:.2f} minutes, test accuracy: {1:.4f}'.format((time.time() - t_start) / 60, accuracy))
         self.logger['test accuracy'] = accuracy
         self.logger['test time [minutes]'] = (time.time() - t_start) / 60
+        self.operation_mode = 'train'
         return accuracy
 
-    def train(self, data_path, max_iter=20, mode='base'):
+    def train(self, data_path, test_path=None, early_stop=False, shuffle=False, max_iter=20, mode='base'):
         """
         train weights given a data set of sentences
         :param data_path: path to train set data file
+        :param test_path: path to test set data file
+        :param early_stop: boolean, if True - early stop after iteration stops improving
+        :param shuffle: boolean, if True - shuffle the order of the data in each iteration
         :param max_iter: max number of iteration that will be performed in the perceptron algorithm
         :param mode: base mode or complex mode of features
         :return:
         """
         self.mode = mode
         self.data_preprocessing(data_path, mode='train')
+        if test_path:
+            self.data_preprocessing(test_path, mode='test')
+            test_accuracy_list = [0.]
         self.features_size = self.get_features_size()
         self.w = np.zeros(self.features_size)
 
@@ -272,12 +342,22 @@ class DependencyParser:
         self.logger['max iterations'] = max_iter
 
         t_start = time.time()
+
+        s = np.arange(len(self.data))
+
         # run perceptron algorithm for max_iter times
         for i in range(max_iter):
-            t_iteration_start = time.time()
+
+            # shuffling
+            if shuffle:
+                np.random.shuffle(s)
+
             early_stop_conditions = True
 
-            for sen_idx, sen in enumerate(self.data):
+            # training
+            t_iteration_start = time.time()
+            for sen_idx in s:
+                sen = self.data[sen_idx]
                 self.curr_sentence = sen_idx
                 graph = Digraph(self.create_succesors(len(sen)), get_score=self.get_score)
                 result = graph.mst().successors
@@ -288,8 +368,14 @@ class DependencyParser:
                     true_feature = self.get_glm(self.data_edges[sen_idx])
                     np.add.at(self.w, true_feature, 1)
                     np.add.at(self.w, predicted_feature, -1)
-
             print('finished iteration {0} in {1:.2f} minutes'.format(i + 1, (time.time() - t_iteration_start) / 60))
+
+            # testing
+            if test_path:
+                test_accuracy = self.test()
+                test_accuracy_list.append(test_accuracy)
+                if early_stop and (test_accuracy_list[-1] < test_accuracy_list[-2] or test_accuracy == 100.):
+                    early_stop_conditions = True
 
             # if all predictions are correct - stop the training
             if early_stop_conditions:
@@ -299,20 +385,23 @@ class DependencyParser:
         self.logger['training time [minutes]'] = t_end
 
         # clean the data
-        del self.data, self.data_edges
+        self.data = []
+        self.data_edges = []
         self.features = {}
 
-    def get_features(self, parent_node, child_node, get_size=False):
+    def get_features(self, parent_node, child_node, curr_sen_data, get_size=False):
         """
         create a feature vector as list of indexes of the ones for a directed edge(parent_node --> child_node)
         :param parent_node: all parent data (wod, pos, etc) as a tuple
         :param child_node: all child data (wod, pos, etc) as a tuple
+        :param curr_sen_data: all the sentence data as a dict when keys are word index
         :param get_size: if True return only the feature vector size
         :return: feature vector as list of indexes
         """
 
-        (parent_word, parent_pos, parent_ind) = parent_node
-        (child_word, child_pos, child_ind) = child_node
+        (parent_word, parent_pos, parent_ind, parent_right_pos_ind, parent_left_pos_ind) = parent_node
+        (child_word, child_pos, child_ind, child_right_pos_ind, child_left_pos_ind) = child_node
+
         try:
             parent_word_ind = self.vocabulary[parent_word]
         except:
@@ -484,28 +573,28 @@ class DependencyParser:
             # feature 107: all pos between parent and child:
             if max_ind-min_ind < max_gap:
                 for i in range(min_ind+1, max_ind):
-                    pos = self.data[self.curr_sentence][i][1]
+                    pos = curr_sen_data[i][1]
                     feature.append(curr_size + self.pos[pos])
             curr_size += self.pos_size  # size: POS size
 
             # feature 108: p-pos, all pos between parent and child:
             if max_ind-min_ind < max_gap:
                 for i in range(min_ind+1, max_ind):
-                    pos = self.data[self.curr_sentence][i][1]
+                    pos = curr_sen_data[i][1]
                     feature.append(curr_size + self.pos[pos]*self.pos_size + parent_pos_ind)
             curr_size += self.pos_size**2   # size: POS size^2
 
             # feature 109: c-pos, all pos between parent and child:
             if max_ind-min_ind < max_gap:
                 for i in range(min_ind+1, max_ind):
-                    pos = self.data[self.curr_sentence][i][1]
+                    pos = curr_sen_data[i][1]
                     feature.append(curr_size + self.pos[pos]*self.pos_size + child_pos_ind)
             curr_size += self.pos_size**2   # size: POS size^2
 
             # feature 110: p-pos, signed gap, all pos between parent and child:
             if max_ind-min_ind < max_gap:
                 for i in range(min_ind+1, max_ind):
-                    pos = self.data[self.curr_sentence][i][1]
+                    pos = curr_sen_data[i][1]
                     feature.append(curr_size + self.pos[pos]*self.pos_size*max_sen_len +
                                                             parent_pos_ind*max_sen_len + signed_gap)
             curr_size += self.pos_size**2 * max_sen_len   # size: POS size^2 * max_sen_len
@@ -513,7 +602,7 @@ class DependencyParser:
             # feature 111: c-pos, signed gap, all pos between parent and child:
             if max_ind-min_ind < max_gap:
                 for i in range(min_ind+1, max_ind):
-                    pos = self.data[self.curr_sentence][i][1]
+                    pos = curr_sen_data[i][1]
                     feature.append(curr_size + self.pos[pos]*self.pos_size*max_sen_len +
                                                                 child_pos_ind*max_sen_len + signed_gap)
             curr_size += self.pos_size**2 * max_sen_len  # size: POS size^2 * max_sen_len
@@ -521,41 +610,10 @@ class DependencyParser:
             # feature 112: p-pos, c-pos, signed gap, all pos between parent and child:
             if max_ind-min_ind < max_gap:
                 for i in range(min_ind+1, max_ind):
-                    pos = self.data[self.curr_sentence][i][1]
+                    pos = curr_sen_data[i][1]
                     feature.append(curr_size + self.pos[pos]*(self.pos_size**2)*max_sen_len +
                                 child_pos_ind*max_sen_len*self.pos_size + signed_gap*self.pos_size + parent_pos_ind)
             curr_size += self.pos_size**3 * max_sen_len  # size: POS size^3 * max_sen_len
-
-            # calculate the pos of parent[i-1]
-            if parent_ind > 1:
-                parent_left_pos_ind = self.pos[self.data[self.curr_sentence][parent_ind - 1][1]]
-            elif parent_ind == 1:
-                parent_left_pos_ind = self.pos['root']
-            else:
-                parent_left_pos_ind = -1
-
-            # calculate the pos of child[i-1]
-            if child_ind > 1:
-                child_left_pos_ind = self.pos[self.data[self.curr_sentence][child_ind - 1][1]]
-            elif parent_ind == 1:
-                child_left_pos_ind = self.pos['root']
-            else:
-                child_left_pos_ind = -1
-
-            sen_length = len(
-                self.data[self.curr_sentence])  # curr sentence length (without root, meaning true length is +1)
-
-            # calculate the pos of parent[i+1]
-            if parent_ind < sen_length:
-                parent_right_pos_ind = self.pos[self.data[self.curr_sentence][parent_ind + 1][1]]
-            else:
-                parent_right_pos_ind = -1
-
-            # calculate the pos of child[i+1]
-            if child_ind < sen_length:
-                child_right_pos_ind = self.pos[self.data[self.curr_sentence][child_ind + 1][1]]
-            else:
-                child_right_pos_ind = -1
 
             # feature 200: p[i]-pos, p[i-1]-pos
             f200 = curr_size + parent_pos_ind * self.pos_size + parent_left_pos_ind
@@ -626,7 +684,7 @@ class DependencyParser:
         """
         :return: feature vector size
         """
-        return self.get_features(('root', 'root', 0), ('root', 'root', 0), get_size=True)
+        return self.get_features(('root', 'root', 0, -1, -1), ('root', 'root', 0, -1, -1),{}, get_size=True)
 
     def save_model(self, resultsfn):
         """
