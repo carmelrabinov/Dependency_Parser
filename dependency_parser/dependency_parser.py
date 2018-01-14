@@ -160,7 +160,7 @@ class DependencyParser:
 
         return glm
 
-    def predict(self, comp_path, results_path=None):
+    def predict(self, comp_path, resultsfn=None):
         """
         predict results for comp set and save a prdiction.wtag results file if results_path is provided
         :param comp_path: path to comp set data file
@@ -187,8 +187,12 @@ class DependencyParser:
             predictions.append(mst)
 
         # save results to results_path directory as predictions.txt
-        if results_path:
-            with open(results_path + '\\predictions.wtag', 'w') as f:
+        if resultsfn:
+            # creating directory
+            if not os.path.exists(resultsfn):
+                os.makedirs(resultsfn)
+            # save prediction file
+            with open(resultsfn + '\\predictions.wtag', 'w') as f:
                 for sen_idx, sen in enumerate(self.data):
                     for i in range(1, len(sen)+1):
                         label = [key for key,val in predictions[sen_idx].items() if i in val][0]
@@ -354,7 +358,7 @@ class DependencyParser:
         if parent_word_ind != -1:
             feature.append(f5)
 
-        # feature 6: p-pos
+        # feature 6: c-pos
         f6 = curr_size + child_pos_ind
         curr_size += self.pos_size  # size: POS size
         feature.append(f6)
@@ -379,11 +383,23 @@ class DependencyParser:
         # Complex Features:
         if self.mode == 'complex':
 
+            # feature 20: c-word, p-pos
+            f20 = curr_size + child_word_ind * self.pos_size + parent_pos_ind
+            curr_size += self.pos_size * self.v_size  # size = POS size * Vocabulary size
+            if child_word_ind != -1:
+                feature.append(f20)
+
+            # feature 21: p-word, c-pos
+            f20 = curr_size + parent_word_ind * self.pos_size + child_pos_ind
+            curr_size += self.pos_size * self.v_size  # size = POS size * Vocabulary size
+            if child_word_ind != -1:
+                feature.append(f20)
+
             # define gap constants
-            max_sen_length = 250
-            signed_gap = (max_sen_length + parent_ind - child_ind)
+            max_sen_len = 250
+            signed_gap = (max_sen_len + parent_ind - child_ind)
             abs_gap = np.abs(parent_ind - child_ind)
-            max_gap = max_sen_length
+            max_gap = max_sen_len
 
             min_ind = min(child_ind, parent_ind)
             max_ind = max(child_ind, parent_ind)
@@ -408,60 +424,60 @@ class DependencyParser:
 
             # feature 100: abs(gap)
             f100 = curr_size + abs_gap
-            curr_size += max_sen_length  # size: max_sen_length
+            curr_size += max_sen_len  # size: max_sen_len
             if child_word_ind != -1 and parent_word_ind != -1:
                 feature.append(f100)
 
             # feature 101: gap
             f101 = curr_size + signed_gap
-            curr_size += max_sen_length * 2  # size: max_sen_length * 2
+            curr_size += max_sen_len * 2  # size: max_sen_len * 2
             if child_word_ind != -1 and parent_word_ind != -1:
                 feature.append(f101)
 
             # with abs(gap)
             # feature 102: p-pos, abs(gap)
             f102 = curr_size + abs_gap * self.pos_size + parent_pos_ind
-            curr_size += self.pos_size * max_sen_length  # size: POS size * max_sen_length
+            curr_size += self.pos_size * max_sen_len  # size: POS size * max_sen_len
             feature.append(f102)
 
             # feature 103: c-pos, abs(gap)
             f103 = curr_size + abs_gap * self.pos_size + child_pos_ind
-            curr_size += self.pos_size * max_sen_length  # size: POS size * max_sen_length
+            curr_size += self.pos_size * max_sen_len  # size: POS size * max_sen_len
             feature.append(f103)
 
             # feature 104: p-pos, c-pos, abs(gap)
             f104 = curr_size + abs_gap * self.pos_size ** 2 + \
                                                     child_pos_ind * self.pos_size + parent_pos_ind
-            curr_size += self.pos_size**2 * max_sen_length  # size: POS size^2 * max_sen_length
+            curr_size += self.pos_size**2 * max_sen_len  # size: POS size^2 * max_sen_len
             feature.append(f104)
 
             # with signed gap
             # feature 102: p-pos, signed(gap)
             f102 = curr_size + signed_gap * self.pos_size + parent_pos_ind
-            curr_size += self.pos_size * max_sen_length * 2  # size: POS size * max_sen_length*2
+            curr_size += self.pos_size * max_sen_len * 2  # size: POS size * max_sen_len*2
             feature.append(f102)
 
             # feature 103: c-pos, signed(gap)
             f103 = curr_size + signed_gap * self.pos_size + child_pos_ind
-            curr_size += self.pos_size * max_sen_length*2  # size: POS size * max_sen_length*2
+            curr_size += self.pos_size * max_sen_len*2  # size: POS size * max_sen_len*2
             feature.append(f103)
 
             # feature 104: p-pos, c-pos, signed(gap)
             f104 = curr_size + signed_gap * self.pos_size ** 2 + \
                                                     child_pos_ind * self.pos_size + parent_pos_ind
-            curr_size += self.pos_size**2 * max_sen_length*2  # size: POS size^2 * max_sen_length*2
+            curr_size += self.pos_size**2 * max_sen_len*2  # size: POS size^2 * max_sen_len*2
             feature.append(f104)
 
             # with signed gap
             # feature 105: p-word, signed(gap)
             f105 = curr_size + signed_gap * self.v_size + parent_word_ind
-            curr_size += self.v_size * max_sen_length * 2  # size: Vocabulary size * max_sen_length*2
+            curr_size += self.v_size * max_sen_len * 2  # size: Vocabulary size * max_sen_len*2
             if parent_word_ind != -1:
                 feature.append(f105)
 
             # feature 106: c-word, signed(gap)
             f106 = curr_size + signed_gap * self.v_size + child_word_ind
-            curr_size += self.v_size * max_sen_length*2  # size: Vocabulary size * max_sen_length*2
+            curr_size += self.v_size * max_sen_len*2  # size: Vocabulary size * max_sen_len*2
             if child_word_ind != -1:
                 feature.append(f106)
 
@@ -490,80 +506,116 @@ class DependencyParser:
             if max_ind-min_ind < max_gap:
                 for i in range(min_ind+1, max_ind):
                     pos = self.data[self.curr_sentence][i][1]
-                    feature.append(curr_size + self.pos[pos]*self.pos_size*max_sen_length +
-                                                            parent_pos_ind*max_sen_length + signed_gap)
-            curr_size += self.pos_size**2 * max_sen_length   # size: POS size^2 * max_sen_length
+                    feature.append(curr_size + self.pos[pos]*self.pos_size*max_sen_len +
+                                                            parent_pos_ind*max_sen_len + signed_gap)
+            curr_size += self.pos_size**2 * max_sen_len   # size: POS size^2 * max_sen_len
 
             # feature 111: c-pos, signed gap, all pos between parent and child:
             if max_ind-min_ind < max_gap:
                 for i in range(min_ind+1, max_ind):
                     pos = self.data[self.curr_sentence][i][1]
-                    feature.append(curr_size + self.pos[pos]*self.pos_size*max_sen_length +
-                                                                child_pos_ind*max_sen_length + signed_gap)
-            curr_size += self.pos_size**2 * max_sen_length  # size: POS size^2 * max_sen_length
+                    feature.append(curr_size + self.pos[pos]*self.pos_size*max_sen_len +
+                                                                child_pos_ind*max_sen_len + signed_gap)
+            curr_size += self.pos_size**2 * max_sen_len  # size: POS size^2 * max_sen_len
 
             # feature 112: p-pos, c-pos, signed gap, all pos between parent and child:
             if max_ind-min_ind < max_gap:
                 for i in range(min_ind+1, max_ind):
                     pos = self.data[self.curr_sentence][i][1]
-                    feature.append(curr_size + self.pos[pos]*(self.pos_size**2)*max_sen_length +
-                                child_pos_ind*max_sen_length*self.pos_size + signed_gap*self.pos_size + parent_pos_ind)
-            curr_size += self.pos_size**3 * max_sen_length  # size: POS size^3 * max_sen_length
+                    feature.append(curr_size + self.pos[pos]*(self.pos_size**2)*max_sen_len +
+                                child_pos_ind*max_sen_len*self.pos_size + signed_gap*self.pos_size + parent_pos_ind)
+            curr_size += self.pos_size**3 * max_sen_len  # size: POS size^3 * max_sen_len
 
-            # # calculate the pos of parent[i-1]
-            # if parent_ind > 1:
-            #     parent_left_pos_ind = self.pos[self.data[self.curr_sentence][parent_ind - 1][1]]
-            # elif parent_ind == 1:
-            #     parent_left_pos_ind = self.pos['root']
-            # else:
-            #     parent_left_pos_ind = -1
-            #
-            # # calculate the pos of child[i-1]
-            # if child_ind > 1:
-            #     child_left_pos_ind = self.pos[self.data[self.curr_sentence][child_ind - 1][1]]
-            # elif parent_ind == 1:
-            #     child_left_pos_ind = self.pos['root']
-            # else:
-            #     child_left_pos_ind = -1
-            #
-            # sen_length = len(
-            #     self.data[self.curr_sentence])  # curr sentence length (without root, meaning true length is +1)
-            #
-            # # calculate the pos of parent[i+1]
-            # if parent_ind < sen_length:
-            #     parent_right_pos_ind = self.pos[self.data[self.curr_sentence][parent_ind + 1][1]]
-            # else:
-            #     parent_right_pos_ind = -1
-            #
-            # # calculate the pos of child[i+1]
-            # if child_ind < sen_length:
-            #     child_right_pos_ind = self.pos[self.data[self.curr_sentence][child_ind + 1][1]]
-            # else:
-            #     child_right_pos_ind = -1
-            #
-            # # feature 200: p[i]-pos, p[i-1]-pos
-            # f200 = curr_size + parent_pos_ind * self.pos_size + parent_left_pos_ind
-            # curr_size += self.pos_size ** 2  # size: POS size^2
-            # if parent_left_pos_ind != -1:
-            #     feature.append(f200)
-            #
-            # # feature 201: p[i]-pos, p[i+1]-pos
-            # f201 = curr_size + parent_pos_ind * self.pos_size + parent_right_pos_ind
-            # curr_size += self.pos_size ** 2  # size: POS size^2
-            # if parent_right_pos_ind != -1:
-            #     feature.append(f201)
-            #
-            # # feature 202: c[i]-pos, c[i-1]-pos
-            # f202 = curr_size + child_pos_ind * self.pos_size + child_left_pos_ind
-            # curr_size += self.pos_size ** 2  # size: POS size^2
-            # if child_left_pos_ind != -1:
-            #     feature.append(f202)
-            #
-            # # feature 203: c[i]-pos, c[i+1]-pos
-            # f203 = curr_size + child_pos_ind * self.pos_size + child_right_pos_ind
-            # curr_size += self.pos_size ** 2  # size: POS size^2
-            # if child_right_pos_ind != -1:
-            #     feature.append(f203)
+            # calculate the pos of parent[i-1]
+            if parent_ind > 1:
+                parent_left_pos_ind = self.pos[self.data[self.curr_sentence][parent_ind - 1][1]]
+            elif parent_ind == 1:
+                parent_left_pos_ind = self.pos['root']
+            else:
+                parent_left_pos_ind = -1
+
+            # calculate the pos of child[i-1]
+            if child_ind > 1:
+                child_left_pos_ind = self.pos[self.data[self.curr_sentence][child_ind - 1][1]]
+            elif parent_ind == 1:
+                child_left_pos_ind = self.pos['root']
+            else:
+                child_left_pos_ind = -1
+
+            sen_length = len(
+                self.data[self.curr_sentence])  # curr sentence length (without root, meaning true length is +1)
+
+            # calculate the pos of parent[i+1]
+            if parent_ind < sen_length:
+                parent_right_pos_ind = self.pos[self.data[self.curr_sentence][parent_ind + 1][1]]
+            else:
+                parent_right_pos_ind = -1
+
+            # calculate the pos of child[i+1]
+            if child_ind < sen_length:
+                child_right_pos_ind = self.pos[self.data[self.curr_sentence][child_ind + 1][1]]
+            else:
+                child_right_pos_ind = -1
+
+            # feature 200: p[i]-pos, p[i-1]-pos
+            f200 = curr_size + parent_pos_ind * self.pos_size + parent_left_pos_ind
+            curr_size += self.pos_size ** 2  # size: POS size^2
+            if parent_left_pos_ind != -1:
+                feature.append(f200)
+
+            # feature 201: p[i]-pos, p[i+1]-pos
+            f201 = curr_size + parent_pos_ind * self.pos_size + parent_right_pos_ind
+            curr_size += self.pos_size ** 2  # size: POS size^2
+            if parent_right_pos_ind != -1:
+                feature.append(f201)
+
+            # feature 202: c[i]-pos, c[i-1]-pos
+            f202 = curr_size + child_pos_ind * self.pos_size + child_left_pos_ind
+            curr_size += self.pos_size ** 2  # size: POS size^2
+            if child_left_pos_ind != -1:
+                feature.append(f202)
+
+            # feature 203: c[i]-pos, c[i+1]-pos
+            f203 = curr_size + child_pos_ind * self.pos_size + child_right_pos_ind
+            curr_size += self.pos_size ** 2  # size: POS size^2
+            if child_right_pos_ind != -1:
+                feature.append(f203)
+
+            # feature 204: c[i]-pos, c[i+1]-pos, c[i-1]-pos
+            f204 = curr_size + child_pos_ind*self.pos_size**2 + child_right_pos_ind*self.pos_size + child_left_pos_ind
+            curr_size += self.pos_size ** 3  # size: POS size^3
+            if child_right_pos_ind != -1 and child_left_pos_ind:
+                feature.append(f204)
+
+            # feature 205: p[i]-pos, p[i+1]-pos, p[i-1]-pos
+            f205 = curr_size + parent_pos_ind*self.pos_size**2 + parent_right_pos_ind*self.pos_size + parent_left_pos_ind
+            curr_size += self.pos_size ** 3  # size: POS size^3
+            if parent_right_pos_ind != -1 and parent_left_pos_ind:
+                feature.append(f205)
+
+            # feature 206: p[i]-pos, p[i-1]-pos, signed(gap)
+            f206 = curr_size + parent_pos_ind*self.pos_size*max_sen_len + parent_left_pos_ind*max_sen_len + signed_gap
+            curr_size += self.pos_size**2*max_sen_len  # size: POS size^2 * max_sen_len
+            if parent_left_pos_ind != -1:
+                feature.append(f206)
+
+            # feature 207: p[i]-pos, p[i+1]-pos, signed(gap)
+            f207 = curr_size + parent_pos_ind*self.pos_size*max_sen_len + parent_right_pos_ind*max_sen_len + signed_gap
+            curr_size += self.pos_size ** 2 * max_sen_len  # size: POS size^2 * max_sen_len
+            if parent_right_pos_ind != -1:
+                feature.append(f207)
+
+            # feature 208: c[i]-pos, c[i-1]-pos, signed(gap)
+            f208 = curr_size + child_pos_ind*self.pos_size*max_sen_len + child_left_pos_ind*max_sen_len + signed_gap
+            curr_size += self.pos_size ** 2 * max_sen_len  # size: POS size^2 * max_sen_len
+            if child_left_pos_ind != -1:
+                feature.append(f208)
+
+            # feature 209: c[i]-pos, c[i+1]-pos, signed(gap)
+            f209 = curr_size + child_pos_ind*self.pos_size*max_sen_len + child_right_pos_ind*max_sen_len + signed_gap
+            curr_size += self.pos_size ** 2 * max_sen_len  # size: POS size^2 * max_sen_len
+            if child_right_pos_ind != -1:
+                feature.append(f209)
 
         if get_size:
             return curr_size
@@ -596,6 +648,10 @@ class DependencyParser:
         :param resultsfn: path to directory to save in the log file
         :return: None
         """
+        # creating directory
+        if not os.path.exists(resultsfn):
+            os.makedirs(resultsfn)
+        # save log file
         print('Saving logs to {}\n'.format(resultsfn))
         with open(resultsfn + '\\logs.txt', 'w') as f:
             for key, value in sorted(self.logger.items()):

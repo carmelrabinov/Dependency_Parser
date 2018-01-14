@@ -18,7 +18,7 @@ test_path = project_dir + '\\data\\test.labeled'
 train_path = project_dir + '\\data\\train.labeled'
 train_toy_path = project_dir + '\\data\\train_toy.labeled'
 debug_path = project_dir + '\\data\\debug.labeled'
-results_path = 'results\\complex_gap_features'
+results_path = project_dir + '\\results\\complex_left_right_pos_features'
 
 parser = DependencyParser()
 parser.train(train_toy_path, max_iter=20, mode='complex')
