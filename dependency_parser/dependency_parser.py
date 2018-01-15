@@ -293,11 +293,7 @@ class DependencyParser:
             # predict the mst
             graph = Digraph(self.create_succesors(len(sen)), get_score=self.get_score)
             mst = graph.mst().successors
-            # print('sentence number: {}'.format(sen_idx))
-            # print(mst)
-            # print(sen)
-            # print(self.data_edges[sen_idx])
-            # print('\n')
+
             # compare the predicted mst to the true one and count all correct edges
             for i in range(len(mst)):
                 correct_counter += len([w for w in mst[i] if w in self.test_data_edges[sen_idx][i]])
@@ -315,6 +311,63 @@ class DependencyParser:
         self.logger['test time [minutes]'] = (time.time() - t_start) / 60
         self.operation_mode = 'train'
         return accuracy
+
+    def analysis(self, test_path=None, analysis_path=None):
+        """
+        predict and test accuracy of test set
+        :param test_path: path to test set data file
+        :param analysis_path: path to directory to save analysis results
+        :return: accuracy in percentage over the test set
+        """
+        self.operation_mode = 'test'
+        t_start = time.time()
+        if test_path:
+            self.data_preprocessing(test_path, mode='test')
+
+        # creating directory
+        if not os.path.exists(analysis_path):
+            os.makedirs(analysis_path)
+        f = open(analysis_path + '\\analysis.txt', 'w')
+
+        # iterate ove all the data
+        for sen_idx, sen in enumerate(self.test_data):
+            self.curr_sentence = sen_idx
+
+            # predict the mst
+            graph = Digraph(self.create_succesors(len(sen)), get_score=self.get_score)
+            mst = graph.mst().successors
+
+            # compare the predicted mst to the true one and count all correct edges
+            sen_errors = []
+            for i in range(len(mst)):
+                sen_errors.extend([(child, i) for child in self.test_data_edges[sen_idx][i] if child not in mst[i]])
+
+            f.write('sentence ' + str(sen_idx) + '\n')
+            f.write(str(sen) + '\n')
+            f.write(str(self.test_data_edges[sen_idx]) + '\n')
+            for (child, parent) in sen_errors:
+                if child == 0:
+                    child_data = ('root', 'root', 0)
+                else:
+                    child_data = self.test_data[sen_idx][child] + (child,)
+                if parent == 0:
+                    parent_data = ('root', 'root', 0)
+                else:
+                    parent_data = self.test_data[sen_idx][parent] + (parent,)
+
+                f.write(str(parent_data) + '\t' + str(child_data) + '\n')
+            f.write('\n')
+
+        f.close()
+
+        # clean the data
+        if test_path:
+            self.test_data = []
+            self.test_data_edges = []
+            self.test_features = {}
+
+        print('finished analysis in {0:.2f} minutes'.format((time.time() - t_start) / 60))
+        self.operation_mode = 'train'
 
     def train(self, data_path, test_path=None, patience=0, lr_patience=0, lr_factor=1, min_lr=0.2, shuffle=False, init_w=None, max_iter=20, mode='base'):
         """

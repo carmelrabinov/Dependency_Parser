@@ -20,27 +20,30 @@ train_toy_path = project_dir + '\\data\\train_toy.labeled'
 debug_path = project_dir + '\\data\\debug.labeled'
 
 parser = DependencyParser()
-parser.train(data_path=debug_path,
-             test_path=debug_path,
-             shuffle=False,
-             patience=10,
-             lr_patience=4,
-             lr_factor=0.8,
-             min_lr=0.1,
-             init_w=None,
-             max_iter=50,
-             mode='complex')
-
-# parser.train(data_path=train_path,
-#              test_path=None,
+# parser.train(data_path=debug_path,
+#              test_path=debug_path,
 #              shuffle=True,
-#              max_iter=50,
+#              patience=8,
+#              lr_patience=4,
+#              lr_factor=0.8,
+#              min_lr=0.1,
+#              init_w=None,
+#              max_iter=2,
 #              mode='base')
 
-parser.test(test_path)
+parser.train(data_path=debug_path,
+             test_path=None,
+             shuffle=True,
+             max_iter=5,
+             mode='complex')
 
+parser.test(debug_path)
 results_path = project_dir + '\\results\\tmp'
+parser.analysis(debug_path, results_path)
 parser.print_logs(results_path)
+
+# parser.save_weights(results_path)
+# parser.save_model(results_path)
 
 # parser.predict(test_path, results_path)
 
