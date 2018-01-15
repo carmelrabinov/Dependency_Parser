@@ -13,7 +13,9 @@ def load_model(Fn):
 
 class DependencyParser:
     def __init__(self):
+        self.lr = 1
         self.w = 0
+        self.best_w = 0
         self.mode = 'base'
         self.operation_mode = 'train'
         self.logger = {}
@@ -314,12 +316,12 @@ class DependencyParser:
         self.operation_mode = 'train'
         return accuracy
 
-    def train(self, data_path, test_path=None, early_stop=False, shuffle=False, max_iter=20, mode='base'):
+    def train(self, data_path, test_path=None, patience=0, lr_patience=0, lr_factor=1, min_lr=0.2, shuffle=False, init_w=None, max_iter=20, mode='base'):
         """
         train weights given a data set of sentences
         :param data_path: path to train set data file
         :param test_path: path to test set data file
-        :param early_stop: boolean, if True - early stop after iteration stops improving
+        :param patience: if bigger then zero, early stop after patience number of iteration without accuracy improving
         :param shuffle: boolean, if True - shuffle the order of the data in each iteration
         :param max_iter: max number of iteration that will be performed in the perceptron algorithm
         :param mode: base mode or complex mode of features
@@ -327,11 +329,11 @@ class DependencyParser:
         """
         self.mode = mode
         self.data_preprocessing(data_path, mode='train')
-        if test_path:
-            self.data_preprocessing(test_path, mode='test')
-            test_accuracy_list = [0.]
         self.features_size = self.get_features_size()
-        self.w = np.zeros(self.features_size)
+        if init_w:
+            self.w = init_w
+        else:
+            self.w = np.zeros(self.features_size)
 
         self.logger['mode'] = mode
         self.logger['vocabulary size'] = self.v_size
@@ -340,7 +342,19 @@ class DependencyParser:
         self.logger['train data path'] = data_path
         self.logger['train sentences number'] = len(self.data)
         self.logger['max iterations'] = max_iter
+        self.logger['lr patience'] = lr_patience
+        self.logger['patience'] = patience
+        self.logger['lr factor'] = lr_factor
+        self.logger['min lr'] = min_lr
+        self.logger['shuffle'] = shuffle
+        self.logger['train with validation set'] = test_path
 
+        # test parameter initializing
+        if test_path:
+            self.data_preprocessing(test_path, mode='test')
+            test_accuracy_list = []
+            max_test_accuracy = 0
+            patience_counter = 0
         t_start = time.time()
 
         s = np.arange(len(self.data))
@@ -366,20 +380,39 @@ class DependencyParser:
                     early_stop_conditions = False
                     predicted_feature = self.get_glm(result)
                     true_feature = self.get_glm(self.data_edges[sen_idx])
-                    np.add.at(self.w, true_feature, 1)
-                    np.add.at(self.w, predicted_feature, -1)
+                    np.add.at(self.w, true_feature, self.lr)
+                    np.add.at(self.w, predicted_feature, -self.lr)
             print('finished iteration {0} in {1:.2f} minutes'.format(i + 1, (time.time() - t_iteration_start) / 60))
 
             # testing
             if test_path:
                 test_accuracy = self.test()
                 test_accuracy_list.append(test_accuracy)
-                if early_stop and (test_accuracy_list[-1] < test_accuracy_list[-2] or test_accuracy == 100.):
+                patience_counter += 1
+
+                # save best results weights
+                if test_accuracy > max_test_accuracy:
+                    max_test_accuracy = test_accuracy
+                    self.best_w = self.w
+                    patience_counter = 0
+
+                # decreasing lr by lr_factor if test result did not improve for lr_patience number of iterations
+                if lr_patience and patience_counter >= lr_patience and self.lr > min_lr:
+                    self.lr *= lr_factor
+                    print('updating lr to {0:.2f}'.format(self.lr))
+                    patience_counter /= 2
+
+                # stop if test result did not improve for patience number of iterations
+                if patience and patience_counter == patience:
                     early_stop_conditions = True
+                    print('early stop, best accuracy is: {0:.2f}'.format(max_test_accuracy))
+                    self.logger['early stop after iteration number'] = i
+                    self.logger['max test accuracy'] = max_test_accuracy
 
             # if all predictions are correct - stop the training
             if early_stop_conditions:
                 break
+
         t_end = (time.time() - t_start) / 60
         print('finished training in {0:.2f} minutes\n'.format(t_end))
         self.logger['training time [minutes]'] = t_end
@@ -388,6 +421,11 @@ class DependencyParser:
         self.data = []
         self.data_edges = []
         self.features = {}
+
+        # saving only the best weights
+        if test_path:
+            self.w = self.best_w
+            self.best_w = 0
 
     def get_features(self, parent_node, child_node, curr_sen_data, get_size=False):
         """
@@ -700,6 +738,28 @@ class DependencyParser:
         with open(resultsfn + '\\model.pkl', 'wb') as f:
             pickle.dump(self, f)
 
+    def save_weights(self, resultsfn):
+        """
+        saves the parser trained weights as a pickle file
+        :param resultsfn: path to directory to save in the pickle file
+        :return: None
+        """
+        print('Saving weights to {}\n'.format(resultsfn))
+        # creating directory
+        if not os.path.exists(resultsfn):
+            os.makedirs(resultsfn)
+        # dump all results:
+        with open(resultsfn + '\\weights.pkl', 'wb') as f:
+            pickle.dump(self.w, f)
+
+    def load_weights(self, w):
+        """
+        load a weights vector into the parser
+        :param w: a weights vector
+        :return: None
+        """
+        self.w = w
+
     def print_logs(self, resultsfn):
         """
         saves the logs
@@ -714,3 +774,4 @@ class DependencyParser:
         with open(resultsfn + '\\logs.txt', 'w') as f:
             for key, value in sorted(self.logger.items()):
                 f.write('{}: {}\n'.format(key, value))
+                print(key, ":", value)

@@ -18,14 +18,31 @@ test_path = project_dir + '\\data\\test.labeled'
 train_path = project_dir + '\\data\\train.labeled'
 train_toy_path = project_dir + '\\data\\train_toy.labeled'
 debug_path = project_dir + '\\data\\debug.labeled'
-results_path = project_dir + '\\results\\complex_left_right_pos_features'
 
 parser = DependencyParser()
-parser.train(train_toy_path, test_path, shuffle=True, max_iter=30, mode='base')
+parser.train(data_path=debug_path,
+             test_path=debug_path,
+             shuffle=False,
+             patience=10,
+             lr_patience=4,
+             lr_factor=0.8,
+             min_lr=0.1,
+             init_w=None,
+             max_iter=50,
+             mode='complex')
+
+# parser.train(data_path=train_path,
+#              test_path=None,
+#              shuffle=True,
+#              max_iter=50,
+#              mode='base')
+
+parser.test(test_path)
+
+results_path = project_dir + '\\results\\tmp'
+parser.print_logs(results_path)
 
 # parser.predict(test_path, results_path)
-# parser.test(debug_path)
-parser.print_logs(results_path)
 
 # parser.save_model(results_path)
 
