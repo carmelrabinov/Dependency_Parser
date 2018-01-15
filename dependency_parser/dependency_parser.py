@@ -36,6 +36,8 @@ class DependencyParser:
         self.pos_size = 46
         self.vocabulary = {'root': 0}
         self.v_size = 0
+        self.gap_bins = np.array([5, 10, 20, 30])
+        self.bins_num = len(self.gap_bins)
 
     def data_preprocessing(self, path, mode):
         """
@@ -369,7 +371,7 @@ class DependencyParser:
         print('finished analysis in {0:.2f} minutes'.format((time.time() - t_start) / 60))
         self.operation_mode = 'train'
 
-    def train(self, data_path, test_path=None, patience=0, lr_patience=0, lr_factor=1, min_lr=0.2, shuffle=False, init_w=None, max_iter=20, mode='base'):
+    def train(self, data_path, test_path=None, patience=0, lr_patience=0, lr_factor=1, min_lr=0.2, shuffle=False, init_w=None, max_iter=20, bins_list=[5,10,20,30], mode='base'):
         """
         train weights given a data set of sentences
         :param data_path: path to train set data file
@@ -383,6 +385,8 @@ class DependencyParser:
         self.mode = mode
         self.data_preprocessing(data_path, mode='train')
         self.features_size = self.get_features_size()
+        self.gap_bins = np.array(bins_list)
+        self.bins_num = len(bins_list)
         if init_w:
             self.w = init_w
         else:
@@ -580,9 +584,15 @@ class DependencyParser:
             signed_gap = (max_sen_len + parent_ind - child_ind)
             abs_gap = np.abs(parent_ind - child_ind)
             max_gap = max_sen_len
-
             min_ind = min(child_ind, parent_ind)
             max_ind = max(child_ind, parent_ind)
+            arc_side = int(parent_ind > child_ind)  # 0 for right arc, 1 for left arc
+            if abs_gap > self.gap_bins[0]:
+                gap_bin_ind = int(np.digitize(abs_gap, self.gap_bins)) - 1
+            else:
+                gap_bin_ind = -1
+            if gap_bin_ind > 3:
+                print("bin: {}, gap: {}".format(gap_bin_ind,abs_gap))
 
             # # feature 9: p-word, c-pos, c-word
             # f9 = curr_size + child_pos_ind * (self.v_size**2) + child_word_ind * self.v_size + parent_word_ind
@@ -765,6 +775,67 @@ class DependencyParser:
             curr_size += self.pos_size ** 2 * max_sen_len  # size: POS size^2 * max_sen_len
             if child_right_pos_ind != -1:
                 feature.append(f209)
+
+            # arc direction features:
+            # feature 302: p-pos, arc_direction
+            f302 = curr_size + arc_side * self.pos_size + parent_pos_ind
+            curr_size += self.pos_size * 2  # size: POS size * 2
+            feature.append(f302)
+
+            # feature 303: c-pos, arc_direction
+            f303 = curr_size + arc_side * self.pos_size + child_pos_ind
+            curr_size += self.pos_size * 2  # size: POS size * 2
+            feature.append(f303)
+
+            # feature 304: p-pos, c-pos, arc_direction
+            f304 = curr_size + arc_side * self.pos_size ** 2 + \
+                   child_pos_ind * self.pos_size + parent_pos_ind
+            curr_size += (self.pos_size ** 2) * 2  # size: POS size^2 * 2
+            feature.append(f304)
+
+            # feature 305: p-word, arc_direction
+            f305 = curr_size + arc_side * self.v_size + parent_word_ind
+            curr_size += self.v_size * 2  # size: Vocabulary size * 2
+            if parent_word_ind != -1:
+                feature.append(f305)
+
+            # feature 306: c-word, arc_direction
+            f306 = curr_size + arc_side * self.v_size + child_word_ind
+            curr_size += self.v_size * 2  # size: Vocabulary size * 2
+            if child_word_ind != -1:
+                feature.append(f306)
+
+            # bins gap direction features:
+            # feature 402: p-pos, bin_ind, arc_side
+            f402 = curr_size + gap_bin_ind * 2 * self.pos_size + 2 * parent_pos_ind + arc_side
+            curr_size += 2 * self.pos_size * self.bins_num  # size: POS size * bins_num * 2
+            if gap_bin_ind != -1:
+                feature.append(f402)
+
+            # feature 403: c-pos, bin_ind, arc_side
+            f403 = curr_size + gap_bin_ind * 2 * self.pos_size + 2 * child_pos_ind + arc_side
+            curr_size += 2 * self.pos_size * self.bins_num  # size: POS size * bins_num * 2
+            if gap_bin_ind != -1:
+                feature.append(f403)
+
+            # feature 404: p-pos, c-pos, bin_ind, arc_side
+            f404 = curr_size + gap_bin_ind * 2 * self.pos_size ** 2 + \
+                   child_pos_ind * 2 * self.pos_size + 2 * parent_pos_ind + arc_side
+            curr_size += 2 * (self.pos_size ** 2) * self.bins_num  # size: POS size^2 * bins_num * 2
+            if gap_bin_ind != -1:
+                feature.append(f404)
+
+            # feature 405: p-word, bin_ind, arc_side
+            f405 = curr_size + gap_bin_ind * 2 * self.v_size + 2 * parent_word_ind + arc_side
+            curr_size += 2 * self.v_size * self.bins_num  # size: Vocabulary size * bins_num * 2
+            if parent_word_ind != -1 and gap_bin_ind != -1:
+                feature.append(f405)
+
+            # feature 406: c-word, bin_ind, arc_side
+            f406 = curr_size + gap_bin_ind * 2 * self.v_size + 2 * child_word_ind + arc_side
+            curr_size += 2 * self.v_size * self.bins_num  # size: Vocabulary size * bins_num * 2
+            if child_word_ind != -1 and gap_bin_ind != -1:
+                feature.append(f406)
 
         if get_size:
             return curr_size
