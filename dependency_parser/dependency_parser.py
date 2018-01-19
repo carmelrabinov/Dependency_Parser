@@ -238,7 +238,7 @@ class DependencyParser:
         self.logger['comp data path'] = comp_path
         self.logger['comp sentences number'] = len(self.data)
 
-        # iterate ove all the data
+        # iterate over all the data
         for sen_idx, sen in enumerate(self.data):
             self.curr_sentence = sen_idx
 
@@ -264,7 +264,7 @@ class DependencyParser:
                     f.write('\n')
 
         # clean the data
-        del self.data
+        self.data = []
         self.features = {}
 
         print('finished prediction in {0:.2f} minutes'.format((time.time() - t_start) / 60))
@@ -376,6 +376,11 @@ class DependencyParser:
         :param data_path: path to train set data file
         :param test_path: path to test set data file
         :param patience: if bigger then zero, early stop after patience number of iteration without accuracy improving
+        :param lr_patience: lr will be multiplied by lr_factor after lr_patience iterations with no improvement
+        :param lr_factor: lr will be multiplied by lr_factor after lr_patience iterations with no improvement
+        :param min_lr: min lr can reach
+        :param init_w: weights vector to start train from (instead of zero vector)
+        :param bucketing: use distance between parent and child quantization
         :param shuffle: boolean, if True - shuffle the order of the data in each iteration
         :param max_iter: max number of iteration that will be performed in the perceptron algorithm
         :param mode: base mode or complex mode of features
@@ -448,7 +453,7 @@ class DependencyParser:
                 # save best results weights
                 if test_accuracy > max_test_accuracy:
                     max_test_accuracy = test_accuracy
-                    self.best_w = self.w
+                    self.best_w = np.copy(self.w)
                     patience_counter = 0
 
                 # decreasing lr by lr_factor if test result did not improve for lr_patience number of iterations
@@ -479,7 +484,7 @@ class DependencyParser:
 
         # saving only the best weights
         if test_path:
-            self.w = self.best_w
+            self.w = np.copy(self.best_w)
             self.best_w = 0
 
     def get_features(self, parent_node, child_node, curr_sen_data, get_size=False):
@@ -588,7 +593,7 @@ class DependencyParser:
 
             # bucketing
             if self.bucketing:
-                gap_bins = [1, 2, 3, 4, 5, 6, 7, 10, 15, 20, 25, 30, 40, 50]
+                gap_bins = [1, 2, 3, 5, 10, 20]
                 gap_bin_ind = int(np.digitize(np.abs(parent_ind - child_ind), gap_bins))
                 max_sen_len = len(gap_bins)    # no need for all 250 length, now we can use buckets index
                 if arc_side == 0:   # rights arc -> negative signed_gap
@@ -596,6 +601,8 @@ class DependencyParser:
                 else:   # left arc -> positive signed_gap
                     signed_gap = max_sen_len + gap_bin_ind
                 abs_gap = gap_bin_ind
+                self.gap_bins = gap_bins
+                self.logger['gap_bins'] = gap_bins
 
             # # feature 9: p-word, c-pos, c-word
             # f9 = curr_size + child_pos_ind * (self.v_size**2) + child_word_ind * self.v_size + parent_word_ind
@@ -807,38 +814,6 @@ class DependencyParser:
             curr_size += self.v_size * 2  # size: Vocabulary size * 2
             if child_word_ind != -1:
                 feature.append(f306)
-
-            # # bins gap direction features:
-            # # feature 402: p-pos, bin_ind, arc_side
-            # f402 = curr_size + gap_bin_ind * 2 * self.pos_size + 2 * parent_pos_ind + arc_side
-            # curr_size += 2 * self.pos_size * self.bins_num  # size: POS size * bins_num * 2
-            # if gap_bin_ind != -1:
-            #     feature.append(f402)
-            #
-            # # feature 403: c-pos, bin_ind, arc_side
-            # f403 = curr_size + gap_bin_ind * 2 * self.pos_size + 2 * child_pos_ind + arc_side
-            # curr_size += 2 * self.pos_size * self.bins_num  # size: POS size * bins_num * 2
-            # if gap_bin_ind != -1:
-            #     feature.append(f403)
-            #
-            # # feature 404: p-pos, c-pos, bin_ind, arc_side
-            # f404 = curr_size + gap_bin_ind * 2 * self.pos_size ** 2 + \
-            #        child_pos_ind * 2 * self.pos_size + 2 * parent_pos_ind + arc_side
-            # curr_size += 2 * (self.pos_size ** 2) * self.bins_num  # size: POS size^2 * bins_num * 2
-            # if gap_bin_ind != -1:
-            #     feature.append(f404)
-            #
-            # # feature 405: p-word, bin_ind, arc_side
-            # f405 = curr_size + gap_bin_ind * 2 * self.v_size + 2 * parent_word_ind + arc_side
-            # curr_size += 2 * self.v_size * self.bins_num  # size: Vocabulary size * bins_num * 2
-            # if parent_word_ind != -1 and gap_bin_ind != -1:
-            #     feature.append(f405)
-            #
-            # # feature 406: c-word, bin_ind, arc_side
-            # f406 = curr_size + gap_bin_ind * 2 * self.v_size + 2 * child_word_ind + arc_side
-            # curr_size += 2 * self.v_size * self.bins_num  # size: Vocabulary size * bins_num * 2
-            # if child_word_ind != -1 and gap_bin_ind != -1:
-            #     feature.append(f406)
 
         if get_size:
             return curr_size

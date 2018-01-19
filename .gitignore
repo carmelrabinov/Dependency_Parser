@@ -4,3 +4,5 @@ results/*
 results
 dependency_parser/__pycache__/
 data/debug.labeled
+tmp.py
+final
