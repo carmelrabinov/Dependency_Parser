@@ -1,6 +1,6 @@
 # Dependency_Parser
 This project was written by Carmel Rabinovitz and Amir Livne as part of NLP Technion course
-This is a dependency parser tagger (using max entropy).
+This is a dependency parser tagger.
 We reached 85.36% accuracy over test set
  
 ## How to use:
